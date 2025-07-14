@@ -1,3 +1,4 @@
+#include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <esp_now.h>
@@ -83,9 +84,9 @@ void broadcastData() {
     }
     
     broadcast_message broadcastMsg;
-    broadcastMsg.usb1 = !digitalRead(USB1);
-    broadcastMsg.usb2 = !digitalRead(USB2);
-    broadcastMsg.usb3 = !digitalRead(USB3);
+    //broadcastMsg.usb1 = !digitalRead(USB1);
+    //broadcastMsg.usb2 = !digitalRead(USB2);
+    //broadcastMsg.usb3 = !digitalRead(USB3);
     broadcastMsg.hv1 = digitalRead(HV1);
     broadcastMsg.hv2 = digitalRead(HV2);
     broadcastMsg.hv3 = digitalRead(HV3);
@@ -120,31 +121,34 @@ void broadcastData() {
 }
 
 // Callback function for received ESP-NOW data (v2.0.3 compatible)
-void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+// Callback function for received ESP-NOW data (v2.0.3 compatible)
+void OnDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
+    // Get the MAC address from recv_info
+    const uint8_t *mac_addr = recv_info->src_addr;
+
     incoming_message receivedMsg;
 
-    
     // Check if received data size matches expected structure
     if (len != sizeof(incoming_message)) {
-        Serial.printf("ERROR: Data size mismatch! Expected %d, got %d\n", 
-                     sizeof(incoming_message), len);
+        Serial.printf("ERROR: Data size mismatch! Expected %d, got %d\n",
+                      sizeof(incoming_message), len);
         return;
     }
-    
+
     // Copy incoming data to structure
     memcpy(&receivedMsg, incomingData, sizeof(receivedMsg));
-    
+
     // Ensure null termination for strings
     receivedMsg.token[31] = '\0';
     receivedMsg.command[15] = '\0';
-    
+
     Serial.printf("Token: %s\n", receivedMsg.token);
     Serial.printf("Command: %s\n", receivedMsg.command);
-    
+
     // Check if token matches
     if (strcmp(receivedMsg.token, AUTH_TOKEN) == 0) {
         Serial.println("Token validated successfully!");
-        bool peerExists = esp_now_is_peer_exist(mac_addr);      
+        bool peerExists = esp_now_is_peer_exist(mac_addr);
         if (!peerExists) {
             esp_now_peer_info_t peerInfo;
             memset(&peerInfo, 0, sizeof(peerInfo));
@@ -162,68 +166,49 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
             Serial.println("Peer already registered in ESP-NOW");
         }
 
-        if(receivedMsg.command[0] == 0xAA && receivedMsg.command[1] == 0xCC)
-          {
+        if (receivedMsg.command[0] == 0xAA && receivedMsg.command[1] == 0xCC) {
+            if (receivedMsg.command[2] == 0xDA) {
+                if (!running) {
+                    if ((receivedMsg.command[3] >= 0x00) && (receivedMsg.command[3] <= 0x05)) {
+                        if (receivedMsg.command[4] == 0xAF) {
+                            if (receivedMsg.command[3] <= 0x02) {
+                                digitalWrite(npins[receivedMsg.command[3]], LOW);
+                            } else {
+                                digitalWrite(npins[receivedMsg.command[3]], HIGH);
+                            }
+                        }
 
-            if(receivedMsg.command[2] == 0xDA)
-            {
-              if(!running)
-              {
-                if((receivedMsg.command[3] >=0x00) && (receivedMsg.command[3] <=0x05))
-                {
-                  if(receivedMsg.command[4] == 0xAF)
-                  {
-                    if(receivedMsg.command[3] <=0x02)
-                    {
-                      digitalWrite(npins[receivedMsg.command[3]],LOW);
+                        if (receivedMsg.command[4] == 0xA0) {
+                            if (receivedMsg.command[3] <= 0x02) {
+                                digitalWrite(npins[receivedMsg.command[3]], HIGH);
+                            } else {
+                                digitalWrite(npins[receivedMsg.command[3]], LOW);
+                            }
+                        }
                     }
-                    else
-                    {
-                      digitalWrite(npins[receivedMsg.command[3]],HIGH);
-                    }
-                  }
-
-                  if(receivedMsg.command[4] == 0xA0)
-                  {
-                    if(receivedMsg.command[3] <=0x02)
-                    {
-                      digitalWrite(npins[receivedMsg.command[3]],HIGH);
-                    }
-                    else
-                    {
-                      digitalWrite(npins[receivedMsg.command[3]],LOW);
-                    }
-                  }
                 }
-              }
+            } else if (receivedMsg.command[2] == 0xDB) {
+                running = true;
+            } else if (receivedMsg.command[2] == 0xDC) {
+                running = true; // This seems to be a duplicate of 0xDB, might be intentional or a typo
+            } else if (receivedMsg.command[2] == 0xCC) {
+                digitalWrite(USB3, HIGH);
+                digitalWrite(USB2, HIGH);
+                digitalWrite(HV1, LOW);
+                started = false;
+                pump = false;
+                air = false;
+                light = false;
+                t_pump = 0;
+                t_light = 0;
+                t_air = 0;
             }
-            else if (receivedMsg.command[2] == 0xDB)
-            {
-              running = true;
-            }
-            else if (receivedMsg.command[2] == 0xDC)
-            {
-              running = true;
-            }
-
-            else if(receivedMsg.command[2] == 0xCC)
-            {
-              digitalWrite(USB3,HIGH);
-              digitalWrite(USB2,HIGH);
-              digitalWrite(HV1,LOW);
-              started = false;
-              pump = false;
-              air = false;
-              light = false;
-              t_pump = 0;
-              t_light=0;
-              t_air=0;
-            }
-          
-          
-
-          }
-
+        }
+    } else {
+        Serial.println("Invalid token - ignoring request");
+        // Don't send any response for invalid tokens
+    }
+}
         
 
 
@@ -236,18 +221,11 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
 
 
 
-    } else {
-        Serial.println("Invalid token - ignoring request");
-        // Don't send any response for invalid tokens
-    }
-}
-
 // Callback function for sent data
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     Serial.print("Last Packet Send Status: ");
     Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
-
 
 
 
@@ -282,12 +260,16 @@ void callback_1s()
   {
     if(!started)
     {
+      Serial.println("Started");
       seconds = 0;
       digitalWrite(USB3,LOW);
+      Serial.println("USB3 ON");
       delay(2000);
       digitalWrite(USB2,LOW);
+      Serial.println("USB2 ON");
       delay(2000);
       digitalWrite(HV1,HIGH);
+      Serial.println("HV1 ON");
       started = true;
       pump = true;
       air = true;
@@ -302,12 +284,14 @@ void callback_1s()
       if(pump)
       {
         digitalWrite(HV1,LOW);
+        Serial.println("HV1 OFF");
         pump = false;
         t_pump = seconds + pumpOff;
       }
       else
       {
         digitalWrite(HV1,HIGH);
+        Serial.println("HV1 ON");
         pump = true;
         t_pump = seconds + pumpOn;
       }
@@ -318,12 +302,14 @@ void callback_1s()
       if(light)
       {
         digitalWrite(USB3,HIGH);
+        Serial.println("USB3 OFF");
         light = false;
         t_light = seconds + lightOff;
       }
       else
       {
         digitalWrite(USB3,LOW);
+        Serial.println("USB3 ON");
         light = true;
         t_light = seconds + lightOn;
       }
@@ -334,12 +320,14 @@ void callback_1s()
       if(air)
       {
         digitalWrite(USB2,HIGH);
+        Serial.println("USB2 OFF");
         air = false;
         t_air = seconds + airOff;
       }
       else
       {
         digitalWrite(USB2,LOW);
+        Serial.println("USB2 ON");
         air = true;
         t_air = seconds + airOn;
       }
@@ -349,6 +337,9 @@ void callback_1s()
   }
   else
   {
+    
+    Serial.println("STOPPED");
+
     digitalWrite(USB3,HIGH);
     digitalWrite(USB2,HIGH);
     digitalWrite(HV1,LOW);
@@ -401,9 +392,16 @@ void setup() {
   digitalWrite(HV1,LOW);
   digitalWrite(HV2,LOW);
   digitalWrite(HV3,LOW);
-    if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for(;;); // Don't proceed, loop forever
+  Wire.setPins(6,7);
+   
+
+
+ if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println("OLED init failed");
+    while(true)
+    {
+
+    } // Don't proceed, loop forever
   }
   display.clearDisplay();
   display.display();
@@ -430,6 +428,8 @@ void setup() {
     Serial.println("---");
 
     mac = WiFi.macAddress();
+    
+    
 }
 
 
