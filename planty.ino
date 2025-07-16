@@ -18,7 +18,36 @@
 #define IP1 2
 #define IP2 1
 
+typedef enum {
+    USB1_PIN = 0,
+    USB2_PIN = 1,
+    USB3_PIN = 2,
+    HV1_PIN = 3,
+    HV2_PIN = 4,
+    HV3_PIN = 5
+} device_index;
+
 int npins[] = {8,9,10,4,3,5};
+bool masks[] = {false,false,false,true,true,true};
+bool states[] = {false,false,false,false,false,false};
+
+void setState(device_index channel,bool state)
+{
+  if(masks[channel])
+  {
+    digitalWrite(npins[channel],state);
+    states[channel] = state;
+  }
+  else{
+    digitalWrite(npins[channel],!state);
+    states[channel] = state;
+  }
+}
+
+bool getState(device_index channel)
+{
+  return states[channel];
+}
 
 unsigned long ms100=0,s1=0,ms500=0;
 
@@ -70,10 +99,35 @@ typedef struct {
     bool hv1;
     bool hv2;
     bool hv3;
+    bool isRunning;
     unsigned long pumpOn,pumpOff,lightOn,lightOff,airOn,airOff;
     char sender_mac[18];
     unsigned long timestamp;
 } broadcast_message;
+
+bool addPeerToList(const uint8_t *mac_addr) {
+    // Check if peer already exists
+    for (int i = 0; i < peerCount; i++) {
+        if (memcmp(peerList[i].mac_addr, mac_addr, 6) == 0) {
+            peerList[i].active = true;
+            Serial.println("Peer already in list - marked as active");
+            return true;
+        }
+    }
+    
+    // Add new peer if there's space
+    if (peerCount < MAX_PEERS) {
+        memcpy(peerList[peerCount].mac_addr, mac_addr, 6);
+        peerList[peerCount].active = true;
+        peerCount++;
+        
+        Serial.printf("Added peer to list. Total peers: %d\n", peerCount);
+        return true;
+    } else {
+        Serial.println("Peer list full - cannot add more peers");
+        return false;
+    }
+}
 
 
 // Function to broadcast temperature and humidity to all peers
@@ -84,18 +138,19 @@ void broadcastData() {
     }
     
     broadcast_message broadcastMsg;
-    //broadcastMsg.usb1 = !digitalRead(USB1);
-    //broadcastMsg.usb2 = !digitalRead(USB2);
-    //broadcastMsg.usb3 = !digitalRead(USB3);
-    broadcastMsg.hv1 = digitalRead(HV1);
-    broadcastMsg.hv2 = digitalRead(HV2);
-    broadcastMsg.hv3 = digitalRead(HV3);
+    broadcastMsg.usb1 = getState(USB1_PIN);
+    broadcastMsg.usb2 = getState(USB2_PIN);
+    broadcastMsg.usb3 = getState(USB3_PIN);
+    broadcastMsg.hv1 = getState(HV1_PIN);
+    broadcastMsg.hv2 = getState(HV2_PIN);
+    broadcastMsg.hv3 = getState(HV3_PIN);
     broadcastMsg.pumpOn = pumpOn;
     broadcastMsg.pumpOff = pumpOff;
     broadcastMsg.lightOn = lightOn;
     broadcastMsg.lightOff = lightOff;
     broadcastMsg.airOn = airOn;
     broadcastMsg.airOff = airOff;
+    broadcastMsg.isRunning = running;
 
     broadcastMsg.timestamp = millis();
     strcpy(broadcastMsg.sender_mac, mac.c_str());
@@ -122,9 +177,8 @@ void broadcastData() {
 
 // Callback function for received ESP-NOW data (v2.0.3 compatible)
 // Callback function for received ESP-NOW data (v2.0.3 compatible)
-void OnDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
     // Get the MAC address from recv_info
-    const uint8_t *mac_addr = recv_info->src_addr;
 
     incoming_message receivedMsg;
 
@@ -156,6 +210,7 @@ void OnDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData,
             peerInfo.channel = 0;  // Use current channel
             peerInfo.encrypt = false;
             esp_err_t addStatus = esp_now_add_peer(&peerInfo);
+            addPeerToList(mac_addr);
             if (addStatus == ESP_OK) {
                 Serial.println("Peer registered in ESP-NOW successfully");
             } else {
@@ -170,32 +225,49 @@ void OnDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData,
             if (receivedMsg.command[2] == 0xDA) {
                 if (!running) {
                     if ((receivedMsg.command[3] >= 0x00) && (receivedMsg.command[3] <= 0x05)) {
-                        if (receivedMsg.command[4] == 0xAF) {
-                            if (receivedMsg.command[3] <= 0x02) {
-                                digitalWrite(npins[receivedMsg.command[3]], LOW);
-                            } else {
-                                digitalWrite(npins[receivedMsg.command[3]], HIGH);
-                            }
-                        }
+                      bool tst = false;
+                      if (receivedMsg.command[4] == 0xAF)
+                      {
+                        tst = true;
+                      }
 
-                        if (receivedMsg.command[4] == 0xA0) {
-                            if (receivedMsg.command[3] <= 0x02) {
-                                digitalWrite(npins[receivedMsg.command[3]], HIGH);
-                            } else {
-                                digitalWrite(npins[receivedMsg.command[3]], LOW);
-                            }
-                        }
+                      if (receivedMsg.command[3] == 0x00)
+                      {
+                        setState(USB1_PIN, tst);
+                      }
+                      else if (receivedMsg.command[3] == 0x01)
+                      {
+                        setState(USB2_PIN, tst);
+                      }
+                      else if (receivedMsg.command[3] == 0x02)
+                      {
+                        setState(USB3_PIN, tst);
+                      }
+                      else if (receivedMsg.command[3] == 0x03)
+                      {
+                        setState(HV1_PIN, tst);
+                      }
+                      else if (receivedMsg.command[3] == 0x04)
+                      {
+                        setState(HV2_PIN, tst);
+                      }
+                      else if (receivedMsg.command[3] == 0x05)
+                      {
+                        setState(HV3_PIN, tst);
+                      }
+
                     }
                 }
             } else if (receivedMsg.command[2] == 0xDB) {
                 running = true;
             } else if (receivedMsg.command[2] == 0xDC) {
-                running = true; // This seems to be a duplicate of 0xDB, might be intentional or a typo
+                running = false; 
             } else if (receivedMsg.command[2] == 0xCC) {
-                digitalWrite(USB3, HIGH);
-                digitalWrite(USB2, HIGH);
-                digitalWrite(HV1, LOW);
+                setState(USB3_PIN, false);
+                setState(USB2_PIN, false);
+                setState(HV1_PIN, false);
                 started = false;
+                running = false;
                 pump = false;
                 air = false;
                 light = false;
@@ -262,13 +334,16 @@ void callback_1s()
     {
       Serial.println("Started");
       seconds = 0;
-      digitalWrite(USB3,LOW);
+      setState(USB3_PIN,true);
+      //digitalWrite(USB3,LOW);
       Serial.println("USB3 ON");
       delay(2000);
-      digitalWrite(USB2,LOW);
+      setState(USB2_PIN,true);
+      //digitalWrite(USB2,LOW);
       Serial.println("USB2 ON");
       delay(2000);
-      digitalWrite(HV1,HIGH);
+      setState(HV1_PIN,true);
+      //digitalWrite(HV1,HIGH);
       Serial.println("HV1 ON");
       started = true;
       pump = true;
@@ -283,14 +358,14 @@ void callback_1s()
     {
       if(pump)
       {
-        digitalWrite(HV1,LOW);
+        setState(HV1_PIN,false);
         Serial.println("HV1 OFF");
         pump = false;
         t_pump = seconds + pumpOff;
       }
       else
       {
-        digitalWrite(HV1,HIGH);
+        setState(HV1_PIN,true);
         Serial.println("HV1 ON");
         pump = true;
         t_pump = seconds + pumpOn;
@@ -301,14 +376,14 @@ void callback_1s()
     {
       if(light)
       {
-        digitalWrite(USB3,HIGH);
+        setState(USB3_PIN,false);
         Serial.println("USB3 OFF");
         light = false;
         t_light = seconds + lightOff;
       }
       else
       {
-        digitalWrite(USB3,LOW);
+        setState(USB3_PIN,true);
         Serial.println("USB3 ON");
         light = true;
         t_light = seconds + lightOn;
@@ -319,14 +394,14 @@ void callback_1s()
     {
       if(air)
       {
-        digitalWrite(USB2,HIGH);
+        setState(USB2_PIN,false);
         Serial.println("USB2 OFF");
         air = false;
         t_air = seconds + airOff;
       }
       else
       {
-        digitalWrite(USB2,LOW);
+        setState(USB2_PIN,true);
         Serial.println("USB2 ON");
         air = true;
         t_air = seconds + airOn;
@@ -338,18 +413,21 @@ void callback_1s()
   else
   {
     
-    Serial.println("STOPPED");
+    if(started == true)
+    {
+          Serial.println("STOPPED");
+          setState(USB3_PIN, false);
+          setState(USB2_PIN, false);
+          setState(HV1_PIN, false);
+          started = false;
+          pump = false;
+          air = false;
+          light = false;
+          t_pump = 0;
+          t_light=0;
+          t_air=0;
+    }
 
-    digitalWrite(USB3,HIGH);
-    digitalWrite(USB2,HIGH);
-    digitalWrite(HV1,LOW);
-    started = false;
-    pump = false;
-    air = false;
-    light = false;
-    t_pump = 0;
-    t_light=0;
-    t_air=0;
   }
 
 }
