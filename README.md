@@ -29,9 +29,9 @@ The "USB" outputs are designed to enable/disable LM2596 5V fixed buck converters
 ## Software Requirements
 
 * **Arduino IDE:** Version 1.8.x or newer is recommended.
-* **ESP32 Boards Manager:** Install `esp32` platform version **3.1.0** or a compatible version via the Arduino IDE Boards Manager.
+* **ESP32 Boards Manager:** Install `esp32` platform version **2.0.3** or a compatible version via the Arduino IDE Boards Manager.
     * Navigate to `File > Preferences`, and add `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json` to "Additional Boards Manager URLs".
-    * Then, go to `Tools > Board > Boards Manager`, search for "esp32", and install version `3.1.0`.
+    * Then, go to `Tools > Board > Boards Manager`, search for "esp32", and install version `2.0.3`.
 * **Adafruit GFX Library:** Install via Arduino Library Manager (`Sketch > Include Library > Manage Libraries...`).
 * **Adafruit SSD1306 Library:** Install via Arduino Library Manager.
 
@@ -137,7 +137,7 @@ The controller can execute pre-configured timed sequences for a pump, light, and
 ## Troubleshooting
 
 * **OLED Display Issues:** If the display doesn't show anything, double-check your I2C wiring (SDA, SCL, VCC, GND) and ensure the `SCREEN_ADDRESS` (0x3C) is correct for your specific SSD1306 module. Some modules use 0x3D.
-* **ESP-NOW Initialization Error:** Ensure your ESP32 board is correctly selected in the Arduino IDE and that the ESP32 core version 3.1.0 is installed. Check `Tools > Board > Get Board Info`.
+* **ESP-NOW Initialization Error:** Ensure your ESP32 board is correctly selected in the Arduino IDE and that the ESP32 core version 2.0.3 is installed. Check `Tools > Board > Get Board Info`.
 * **Relay/Output Not Switching:**
     * Verify your wiring to the LM2596 enable pins and optocoupler inputs.
     * Confirm the active state of your specific LM2596 enable pin (most are active-low, which matches the `OUTPUT_OPEN_DRAIN` setup).
